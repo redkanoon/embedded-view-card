@@ -1,0 +1,9 @@
+{
+  "name": "Embedded View Card",
+  "description": "Allows embedding another view from the same dashboard into a card",
+  "type": "lovelace",
+  "keywords": ["card", "lovelace", "view", "embed"],
+  "authors": ["redkanoon"],
+  "filename": "embedded-view-card.js",
+  "version": "1.1.0"
+}
