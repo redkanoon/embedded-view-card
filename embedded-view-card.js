@@ -7,11 +7,6 @@ class EmbeddedViewCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config.view_path) {
-      this._showError("Missing configuration: view_path");
-      return;
-    }
-
     this._config = config;
     this.shadowRoot.innerHTML = ""; // Clear previous content
 
@@ -26,31 +21,30 @@ class EmbeddedViewCard extends HTMLElement {
       this.shadowRoot.appendChild(this._container);
     }
 
-    this._loadView();
+    // Don't try to load yet – wait for hass
+    this._viewPath = config.view_path || null;
   }
 
   async _loadView() {
     try {
-      // Wait for hui-root to be available (Lovelace root element)
       const root = await this._waitForElement(() => getHuiRoot());
       if (!root) throw new Error("hui-root not found");
 
       const views = root.lovelace?.config?.views;
-      const view = views?.find((v) => v.path === this._config.view_path);
-      if (!view) throw new Error("View not found: " + this._config.view_path);
+      const view = views?.find((v) => v.path === this._viewPath);
+      if (!view) throw new Error("View not found: " + this._viewPath);
 
-      // Create a new hui-view element and assign view config
-      const viewEl = document.createElement("hui-view");
-      viewEl.setAttribute("style", "margin: 0; padding: 0; display: contents;");
-      viewEl.hass = root.hass;
-      viewEl.narrow = false;
-      viewEl.lovelace = root.lovelace;
-      viewEl.index = views.indexOf(view);
-      viewEl.isStrategyView = false;
-      viewEl.viewConfig = view;
+      const embeddedViewElement = document.createElement("hui-view");
+      embeddedViewElement.setAttribute("style", "margin: 0; padding: 0; display: contents;");
+      embeddedViewElement.hass = root.hass;
+      embeddedViewElement.narrow = false;
+      embeddedViewElement.lovelace = root.lovelace;
+      embeddedViewElement.index = views.indexOf(view);
+      embeddedViewElement.isStrategyView = false;
+      embeddedViewElement.viewConfig = view;
 
-      this._container.innerHTML = ""; // Clear container before rendering
-      this._container.appendChild(viewEl);
+      this._container.innerHTML = "";
+      this._container.appendChild(embeddedViewElement);
     } catch (err) {
       this._showError("Error loading view: " + err.message);
       console.error("[embedded-view-card] Error:", err);
@@ -59,23 +53,50 @@ class EmbeddedViewCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    // Forward hass object to the inner view if already rendered
+
+    // Prefer static view_path if set
+    let newPath = this._config.view_path;
+
+    // Otherwise, fallback to dynamic entity if defined
+    if (!newPath && this._config.view_path_entity) {
+      const entity = this._config.view_path_entity;
+      const state = hass.states[entity];
+      if (state) {
+        newPath = state.state;
+      }
+    }
+
+    if (!newPath) {
+      this._showError("Missing configuration: view_path or view_path_entity");
+      return;
+    }
+
+    // Initial load and reload if view_path changed
+    if (newPath !== this._viewPath || !this._container?.firstChild) {
+      this._viewPath = newPath;
+      this._loadView();
+      return;
+    }
+
+    // Just update hass on current view
     if (this._container?.firstChild) {
       this._container.firstChild.hass = hass;
     }
   }
 
   _showError(msg) {
-    // Show warning message inside the card
     this._container.innerHTML = `<hui-warning>${msg}</hui-warning>`;
   }
 
-  getCardSize() {
-    // Return estimated height in grid units
-    return 5;
+getCardSize() {
+  if (this._container?.firstChild?.offsetHeight) {
+    // Estimate rows by height (assuming ~50px per row)
+    return Math.ceil(this._container.firstChild.offsetHeight / 50);
   }
+  // Fallback if not yet rendered
+  return 5;
+}
 
-  // Utility to wait for an element to be available (with timeout)
   _waitForElement(fn, timeout = 10000) {
     return new Promise((resolve, reject) => {
       const interval = 100;
@@ -95,16 +116,19 @@ class EmbeddedViewCard extends HTMLElement {
     return document.createElement("embedded-view-card-editor");
   }
 
+  // Provides a default stub configuration for initial card setup in the editor UI.
+  // This helps Home Assistant render the card preview when adding a new instance.
+  // The view_path remains empty, prompting user selection or entity binding.
   static getStubConfig() {
-    // Default config stub for card picker
     return { type: "custom:embedded-view-card", view_path: "" };
   }
 }
 
 customElements.define("embedded-view-card", EmbeddedViewCard);
 
-
-// Utility function to safely retrieve hui-root element
+// Traverses the shadow DOM to locate the hui-root element of the Lovelace UI.
+// This is required to access the active Lovelace configuration and views.
+// Returns null if the element is not yet available (e.g. during initial load).
 function getHuiRoot() {
   return document
     .querySelector("home-assistant")?.shadowRoot
@@ -113,118 +137,146 @@ function getHuiRoot() {
     ?.querySelector("hui-root");
 }
 
-
-// Config editor for the Embedded View Card
 class EmbeddedViewCardEditor extends HTMLElement {
   setConfig(config) {
     this._config = config;
     this._views = [];
     this._rendered = false;
-    this._loadViews(); // Start loading view options from current dashboard
+    this._loadViews();
   }
 
   async _loadViews() {
     const huiRoot = getHuiRoot();
     const views = huiRoot?.lovelace?.config?.views || [];
 
-    // Only show views with valid path and not 'home'
-    this._views = views
-      .filter((v) => v.path && v.path !== "home")
-      .map((v) => ({
-        value: v.path,
-        label: v.title || v.path,
-      }));
-
+    this._views = [this._label("Dynamic"), ...views.filter((v) => v.path && v.path !== "home").map((v) => v.path)];
     this._render();
   }
 
   _render() {
-    // Prevent re-render or render without required state
     if (this._rendered || !this._hass || !this._views.length) return;
 
-    this.innerHTML = "";
+    this.replaceChildren(container)
 
-    // Wrapper container for layout
     const container = document.createElement("div");
+    const selectedValue = this._config.view_path || this._label("Dynamic");
+    const isDynamic = selectedValue === this._label("Dynamic");
     container.style.display = "flex";
     container.style.flexDirection = "column";
     container.style.gap = "12px";
     container.style.padding = "0 16px";
 
-    // Dropdown for view selection
     const selector = document.createElement("ha-selector");
-    const language = this._hass?.locale?.language ?? "en";
-    const labels = {
-      de: "View auswählen",
-      fr: "Sélectionner une vue",
-      es: "Seleccionar vista",
-      nl: "Selecteer weergave",
-      it: "Seleziona vista",
-      pl: "Wybierz widok",
-      en: "Select view",
-    };
-    selector.label = labels[language] || labels.en;
+    selector.label = this._label("Select view");
     selector.hass = this._hass;
-    selector.selector = {
-      select: {
-        options: this._views,
-        custom_value: true, // Allow typing manual paths
-      },
-    };
-    selector.value = this._config.view_path || "";
+    selector.selector = { select: {
+      options: this._views,
+      custom_value: true
+    } };
+    selector.value = selectedValue;
     selector.id = "view_path";
 
     selector.addEventListener("value-changed", (ev) => {
-      this._config = {
-        ...this._config,
-        type: "custom:embedded-view-card",
-        view_path: ev.detail.value,
-      };
+      const value = ev.detail.value;
+      if (value === this._label("Dynamic")) {
+        delete this._config.view_path;
+      } else {
+        this._config.view_path = value;
+        delete this._config.view_path_entity;
+      }
       this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this._config } }));
+      this._rendered = false;
+      this._render();
     });
 
-    // Checkbox for ha-card wrapping
+    container.appendChild(selector);
+
+    if (isDynamic) {
+      const entityInput = document.createElement("ha-selector");
+      entityInput.label = this._label("Entity (e.g. input_text.window_view)");
+      entityInput.hass = this._hass;
+      entityInput.selector = { entity: {} };
+      entityInput.value = this._config.view_path_entity || "";
+      entityInput.id = "view_path_entity";
+
+      entityInput.addEventListener("value-changed", (ev) => {
+        this._config.view_path_entity = ev.detail.value;
+        this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this._config } }));
+      });
+
+      container.appendChild(entityInput);
+    }
+
     const checkbox = document.createElement("ha-selector");
-    checkbox.label = "Wrap in ha-card";
+    checkbox.label = this._label("Wrap in ha-card");
     checkbox.hass = this._hass;
-    checkbox.selector = {
-      boolean: {},
-    };
+    checkbox.selector = { boolean: {} };
     checkbox.value = this._config.ha_card !== false;
     checkbox.id = "ha_card";
 
     checkbox.addEventListener("value-changed", (ev) => {
-      this._config = {
-        ...this._config,
-        ha_card: ev.detail.value,
-      };
+      this._config.ha_card = ev.detail.value;
       this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this._config } }));
     });
 
-    container.appendChild(selector);
     container.appendChild(checkbox);
 
     this.appendChild(container);
     this._rendered = true;
   }
 
+  _label(text) {
+    const lang = this._hass?.locale?.language ?? "en";
+    const labels = {
+      "Select view": {
+        de: "View auswählen",
+        fr: "Sélectionner une vue",
+        es: "Seleccionar vista",
+        nl: "Selecteer weergave",
+        it: "Seleziona vista",
+        pl: "Wybierz widok",
+        en: "Select view",
+      },
+      "Dynamic": {
+        de: "Dynamisch",
+        fr: "Dynamique",
+        es: "Dinámico",
+        nl: "Dynamisch",
+        it: "Dinamico",
+        pl: "Dynamiczny",
+        en: "Dynamic",
+      },
+      "Entity (e.g. input_text.window_view)": {
+        de: "Entität (z. B. input_text.window_view)",
+        fr: "Entité (ex. input_text.window_view)",
+        es: "Entidad (ej. input_text.window_view)",
+        nl: "Entiteit (bijv. input_text.window_view)",
+        it: "Entità (es. input_text.window_view)",
+        pl: "Encja (np. input_text.window_view)",
+        en: "Entity (e.g. input_text.window_view)",
+      },
+      "Wrap in ha-card": {
+        de: "In ha-card einbetten",
+        fr: "Encapsuler dans ha-card",
+        es: "Envolver en ha-card",
+        nl: "Verpakken in ha-card",
+        it: "Avvolgere in ha-card",
+        pl: "Zawijaj w ha-card",
+        en: "Wrap in ha-card",
+      }
+    };
+    return labels[text]?.[lang] || text;
+  }
+
   set hass(hass) {
     this._hass = hass;
-    // Try re-render if data was loaded before hass
-    if (!this._rendered && this._views?.length) {
-      this._render();
-    }
+    if (!this._rendered && this._views?.length) this._render();
   }
 
-  get config() {
-    return this._config;
-  }
 }
 
-customElements.define("embedded-view-card-editor", EmbeddedViewCardEditor);
+customElements.define("embedded-view-card-editor", EmbeddedViewCardEditor)
 
-
-// Register in the card picker UI
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "embedded-view-card",
@@ -233,7 +285,7 @@ window.customCards.push({
 });
 
 console.info(
-  `%c 🧩 EMBEDDED VIEW CARD %c v1.1.1 `,
+  `%c 🧩 EMBEDDED VIEW CARD %c v1.2.2 `,
   'background: #fafafa; color: #17c711; font-weight: bold; padding: 2px 6px;',
   'background: #17c711; color: #fafafa; font-weight: bold; padding: 2px 4px;'
 );
