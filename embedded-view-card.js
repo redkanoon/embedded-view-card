@@ -156,9 +156,9 @@ class EmbeddedViewCardEditor extends HTMLElement {
   _render() {
     if (this._rendered || !this._hass || !this._views.length) return;
 
+    const container = document.createElement("div");
     this.replaceChildren(container)
 
-    const container = document.createElement("div");
     const selectedValue = this._config.view_path || this._label("Dynamic");
     const isDynamic = selectedValue === this._label("Dynamic");
     container.style.display = "flex";
@@ -285,7 +285,7 @@ window.customCards.push({
 });
 
 console.info(
-  `%c 🧩 EMBEDDED VIEW CARD %c v1.2.2 `,
+  `%c 🧩 EMBEDDED VIEW CARD %c v1.2.3 `,
   'background: #fafafa; color: #17c711; font-weight: bold; padding: 2px 6px;',
   'background: #17c711; color: #fafafa; font-weight: bold; padding: 2px 4px;'
 );
