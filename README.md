@@ -2,6 +2,8 @@
 [![Ko-fi](https://img.shields.io/badge/Support_me_on-Ko--fi-FF5E5B?logo=ko-fi&logoColor=white&style=for-the-badge)](https://ko-fi.com/redkanoon)
 
 
+![](.github/live-switching.gif)
+
 # 🧩 Embedded View Card for Home Assistant
 
 The **Embedded View Card** allows you to embed another Lovelace view directly into a card inside your current dashboard.  
@@ -53,6 +55,8 @@ resources:
 ---
 
 ## 🧰 Configuration Examples
+
+![](.github/live-editing.gif)
 
 ### Static View
 
@@ -125,4 +129,5 @@ If you find this project helpful, consider supporting it here:
 <a href="https://ko-fi.com/redkanoon" target="_blank">
   <img src="https://www.buymeacoffee.com/assets/img/custom_images/white_img.png" alt="Buy Me a Coffee" style="height: auto !important;width: auto !important;">
 </a>
+
 
