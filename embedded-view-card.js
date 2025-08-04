@@ -285,7 +285,7 @@ window.customCards.push({
 });
 
 console.info(
-  `%c 🧩 EMBEDDED VIEW CARD %c v1.2.3 `,
+  `%c 🧩 EMBEDDED VIEW CARD %c v1.2.4 `,
   'background: #fafafa; color: #17c711; font-weight: bold; padding: 2px 6px;',
   'background: #17c711; color: #fafafa; font-weight: bold; padding: 2px 4px;'
 );
