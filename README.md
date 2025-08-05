@@ -66,12 +66,42 @@ view_path: climate
 ha_card: true
 ```
 
-### Dynamic View from Entity
+### Dynamic View from Entity (via input_text)
+
+#### Helper (must exist)
+
+```yaml
+input_text:
+  window_view:
+    name: window_view
+```
+
+#### Card
 
 ```yaml
 type: custom:embedded-view-card
-view_path_entity: input_text.active_view
+view_path_entity: input_text.window_view
 ha_card: false
+```
+
+#### Action (e.g. in a button card)
+
+```yaml
+tap_action:
+  action: perform-action
+  perform_action: input_text.set_value
+  target:
+    entity_id: input_text.window_view
+  data:
+    value: areas-bedroom
+```
+
+#### Make sure the view exists
+
+```yaml
+title: Bedroom
+path: areas-bedroom
+type: sections
 ```
 
 ---
@@ -129,6 +159,7 @@ If you find this project helpful, consider supporting it here:
 <a href="https://ko-fi.com/redkanoon" target="_blank">
   <img src="https://www.buymeacoffee.com/assets/img/custom_images/white_img.png" alt="Buy Me a Coffee" style="height: auto !important;width: auto !important;">
 </a>
+
 
 
 
