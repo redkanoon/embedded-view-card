@@ -1,11 +1,6 @@
 {
   "name": "Embedded View Card",
-  "description": "Allows embedding another view from the same dashboard into a card",
-  "type": "lovelace",
-  "keywords": ["card", "lovelace", "view", "embed"],
-  "authors": ["redkanoon"],
+  "render_readme": true,
   "filename": "embedded-view-card.js",
-  "version": "1.2.4"
+  "homeassistant": "2023.9.0"
 }
-
-
