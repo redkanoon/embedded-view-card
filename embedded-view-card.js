@@ -1,5 +1,8 @@
 // Embedded View Card for Home Assistant
 // Allows embedding another view from the same dashboard into a card
+
+import { VERSION } from "./version.js";
+
 class EmbeddedViewCard extends HTMLElement {
   constructor() {
     super();
@@ -285,7 +288,7 @@ window.customCards.push({
 });
 
 console.info(
-  `%c 🧩 EMBEDDED VIEW CARD %c v1.2.4 `,
+  `%c 🧩 EMBEDDED VIEW CARD %c v${VERSION} `,
   'background: #fafafa; color: #17c711; font-weight: bold; padding: 2px 6px;',
   'background: #17c711; color: #fafafa; font-weight: bold; padding: 2px 4px;'
 );
