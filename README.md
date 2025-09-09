@@ -7,15 +7,17 @@
 
 # 🧩 Embedded View Card for Home Assistant
 
-The **Embedded View Card** allows you to embed another Lovelace view directly into a card inside your current dashboard.  
-It’s perfect for modular layouts and dynamic content control.
+The **Embedded View Card** allows you to embed another Lovelace view directly into a card inside your current dashboard – or even across dashboards.  
+It’s perfect for modular layouts, reusable components, and dynamic navigation.
 
 ---
 
 ## 💡 Why this card?
-Managing complex dashboards with many pages or modular views can become difficult and repetitive. I created this card to make it easier to design reusable view components that can be visually customized and referenced from anywhere – especially the home screen.
+Managing complex dashboards with many pages or modular views can become difficult and repetitive.  
+This card was built to make it easier to design reusable view components that can be visually customized and referenced from anywhere.
 
-Instead of copying entire layouts into every view, you can now embed them once and reuse them multiple times. Compared to using iframes, this approach is faster, more integrated, and avoids the delay of loading a separate web page.
+Instead of copying entire layouts into every view, you can now embed them once and reuse them multiple times.  
+Compared to using iframes, this approach is faster, more integrated, and avoids the delay of loading a separate web page.
 
 This card was built to feel like a native part of Home Assistant – rendering views directly, without hacks or reloads.
 
@@ -23,10 +25,13 @@ This card was built to feel like a native part of Home Assistant – rendering v
 
 ## ⚡ Features
 
-- Embed any view from the same dashboard
+- Embed any view from the **current or another dashboard**
+- **Static mode**: pick dashboard + view directly
+- **Dynamic mode**: use an entity (`input_text`) whose state is `dashboard/view`
+- Loop guard to prevent self-embedding
 - Optionally wrap content in `ha-card`
-- Dynamic view selection via an entity (e.g. `input_text`)
-- Editor UI with localized labels
+- **Bleed mode**: remove default padding with adjustable margins
+- Editor UI with localized labels and previews
 - Compatible with HACS for easy updates
 
 ---
@@ -68,15 +73,16 @@ resources:
 
 ![](https://github.com/redkanoon/embedded-view-card/blob/main/.github/live-editing.gif)
 
-### Static View
+### Static Mode – Fixed View
 
 ```yaml
 type: custom:embedded-view-card
-view_path: climate
+dashboard: dashboard-main
+view: climate
 ha_card: true
 ```
 
-### Dynamic View from Entity (via input_text)
+### Dynamic Mode – View from Entity
 
 #### Helper (must exist)
 
@@ -90,7 +96,8 @@ input_text:
 
 ```yaml
 type: custom:embedded-view-card
-view_path_entity: input_text.window_view
+mode: dynamic
+target_entity: input_text.window_view
 ha_card: false
 ```
 
@@ -103,14 +110,14 @@ tap_action:
   target:
     entity_id: input_text.window_view
   data:
-    value: areas-bedroom
+    value: dashboard-rooms/kitchen
 ```
 
 #### The following view must exist in your dashboard
 
 ```yaml
-title: Bedroom
-path: areas-bedroom
+title: Kitchen
+path: kitchen
 type: sections
 ```
 
@@ -118,21 +125,25 @@ type: sections
 
 ## ⚙️ Options
 
-| Option            | Type     | Description                                                      | Default |
-|-------------------|----------|------------------------------------------------------------------|---------|
-| `view_path`       | string   | Path of the view to embed                                        | —       |
-| `view_path_entity`| entity   | Entity whose state provides the view path dynamically            | —       |
-| `ha_card`         | boolean  | Whether to wrap content in a `ha-card`                           | `true`  |
-
-> **Note:** At least one of `view_path` or `view_path_entity` must be provided.
+| Option             | Type     | Description                                           | Default |
+|--------------------|----------|-------------------------------------------------------|---------|
+| `mode`             | string   | `"static"` or `"dynamic"`                             | static  |
+| `dashboard`        | string   | Dashboard path (static mode)                          | current |
+| `view`             | string   | View path (static mode)                               | —       |
+| `target_entity`    | entity   | Entity whose state provides `dashboard/view` (dynamic)| —       |
+| `ha_card`          | boolean  | Whether to wrap content in a `ha-card`                | true    |
+| `bleed`            | boolean  | Remove outer padding (only when `ha_card: false`)     | false   |
+| `bleed_inline`     | number   | Inline padding override (px)                          | 16      |
+| `bleed_block`      | number   | Block padding override (px)                           | 8       |
 
 ---
 
 ## 🖥️ Editor Support
 
-- Supports Lovelace editor with dropdown selection of available views
-- Localized labels for EN, DE, FR, ES, etc.
-- Automatically switches to dynamic mode when needed
+- Dropdown selection of dashboards and views
+- Dynamic entity preview and format hints
+- Localized labels (EN, DE, FR, ES, IT, NL, PL, …)
+- Warning note about recursive loop detection (not yet supported)
 
 ---
 
@@ -140,8 +151,9 @@ type: sections
 
 - Uses internal components like `hui-root` and `hui-view`  
   *(subject to change by Home Assistant core)*
-- Estimates height automatically (~50 px per row)
-- Gracefully shows error message when view is not found or misconfigured
+- Internal caching of WS configs for faster reloads
+- Smarter re-rendering (only when dashboard/view changes)
+- Gracefully shows error messages when view is not found or misconfigured
 
 ---
 
@@ -150,7 +162,8 @@ type: sections
 Feel free to submit pull requests and suggestions.  
 Ideas for improvement:
 
-- Add support for multi-dashboard embedding
+- Add safe recursive loop detection
+- Add mode "internal" where the embedded view could be changed with actions
 
 ---
 
@@ -162,15 +175,10 @@ MIT License. See [LICENSE](./LICENSE) for full details.
 
 ## ☕ Support
 
-Hey 👋 I love building this little something for Home Assistant!
-Being part of this amazing community is fun 💡
+Hey 👋 I love building this little something for Home Assistant!  
+Being part of this amazing community is fun 💡  
 If you like it, your support means a lot 🙏❤️
 
 <a href="https://ko-fi.com/redkanoon" target="_blank">
   <img src="https://www.buymeacoffee.com/assets/img/custom_images/white_img.png" alt="Buy Me a Coffee" style="height: auto !important;width: auto !important;">
 </a>
-
-
-
-
-
