@@ -5,6 +5,8 @@ const EN = {
   "Invalid dynamic target": "Invalid dynamic target",
   "View not found": "View not found",
   "Error loading view": "Error loading view",
+  "Respect view visibility": "Respect view visibility",
+  "View not visible for this user": "View not visible for this user",
 
   // editor ui
   "Mode": "Mode",
