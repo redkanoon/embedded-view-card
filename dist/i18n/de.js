@@ -5,6 +5,7 @@ const DE = {
   "Invalid dynamic target": "Ungültiges dynamisches Ziel",
   "View not found": "View nicht gefunden",
   "Error loading view": "Fehler beim Laden der View",
+  "View not visible for this user": "View für diesen Benutzer nicht sichtbar",
 
   // editor ui
   "Mode": "Modus",
