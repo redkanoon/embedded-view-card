@@ -5,6 +5,7 @@ const NL = {
   "Invalid dynamic target": "Ongeldig dynamisch doel",
   "View not found": "Weergave niet gevonden",
   "Error loading view": "Fout bij het laden van de weergave",
+  "View not visible for this user": "Weergave niet zichtbaar voor deze gebruiker",
 
   // editor ui
   "Mode": "Modus",
