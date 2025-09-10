@@ -245,6 +245,12 @@ class EmbeddedViewCard extends HTMLElement {
       return;
     }
 
+    // respect 'visible' rules
+    if (!this._isViewVisibleToUser(view)) {
+      this._showError("View not visible for this user");
+      return;
+    }
+
     // create HA hui-view
     const huiview = document.createElement("hui-view");
     huiview.setAttribute("style", "margin:0;padding:0;display:contents;");
@@ -264,6 +270,38 @@ class EmbeddedViewCard extends HTMLElement {
     this._resolved.dashboard = dashboardPath;
   }
 
+
+  // checks if the given view is visible for the current user according to its config
+  _isViewVisibleToUser(view) {
+    // home assistant exposes the current user id on hass.user.id
+    const uid = this._hass?.user?.id || null;
+    if (!uid || !view) return true; // if we can't tell, fail open
+
+    //  normalize possible visibility definitions:
+    //  - 'visible': [ { user: "<id>" }, ... ]  (common)
+    //  - 'visible': [ "<id>", ... ]            (tolerate strings)
+    //  - 'visibility' or 'users' fallbacks (be liberal in what we accept)
+    const raw =
+      (Array.isArray(view.visible) && view.visible.length ? view.visible : null) ||
+      (Array.isArray(view.visibility) && view.visibility.length ? view.visibility : null) ||
+      (Array.isArray(view.users) && view.users.length ? view.users : null);
+
+    // no rules -> visible for everyone
+    if (!raw) return true;
+
+    // allow if any rule explicitly includes the current user id
+    for (const r of raw) {
+      if (typeof r === "string" && r === uid) return true;
+      if (r && typeof r === "object") {
+        if (typeof r.user === "string" && r.user === uid) return true;
+        if (Array.isArray(r.user) && r.user.includes(uid)) return true;
+        if (Array.isArray(r.users) && r.users.includes(uid)) return true;
+      }
+    }
+
+    // rules exist but none matched -> not visible for this user
+    return false;
+  }
 
   // fetch dashboard config  (only refresh when `force: true`)
   async _fetchLovelaceConfigWS(urlPath, { force = false } = {}) {
@@ -413,24 +451,31 @@ class EmbeddedViewCardEditor extends HTMLElement {
   // applies configuration and builds/updates the editor UI
   set hass(hass) {
     this._hass = hass;
-    this._collectDashboards();
-    if (!this._rendered) this._safeRender();
+    this._collectDashboards().then(() => {
+      if (!this._rendered) this._safeRender();
+    });
   }
 
 
   // collect all available lovelace dashboards from hass.panels for the editor dropdown
-  _collectDashboards() {
+  async _collectDashboards() {
     try {
       const panels = this._hass?.panels || {};
       const list = [];
       const deny = new Set(["lovelace", "map"]); // skip reserved panels like "lovelace" (default) or "map"
 
       for (const [key, p] of Object.entries(panels)) {
+        // no lovelace view
         const comp = p?.component_name || p?.component;
         if (comp !== "lovelace") continue;
 
+        // on deny list
         const urlPath = (typeof p.url_path === "string" && p.url_path.length) ? p.url_path : key;
         if (deny.has(urlPath)) continue;
+
+        // no visible views for this user
+        const views = await this._loadViewsFor(urlPath);
+        if (!Array.isArray(views) || views.length === 0) continue;
 
         const label = (p.title && String(p.title).trim()) ? `${p.title} (${urlPath})` : urlPath;
         list.push({ value: urlPath, label });
@@ -709,6 +754,8 @@ class EmbeddedViewCardEditor extends HTMLElement {
     wrap.appendChild(warn);
 
     this.replaceChildren(wrap);
+    // if dashboard list was not yet loaded we need a re-render
+    if (!this._dashboards?.length) return
     this._rendered = true;
   }
 
@@ -718,7 +765,7 @@ class EmbeddedViewCardEditor extends HTMLElement {
     try {
       // load WS views for a dashboard
       const wsConfig = await this._hass.callWS({ type: "lovelace/config", url_path: urlPath });
-      const wsViews = wsConfig?.views || [];
+      const wsViews = wsConfig?.views.filter(v => this._isViewVisibleToUser(v)) || [];  // respect visibility
 
       // editor uses numeric index ("0") if view has no path
       return (Array.isArray(wsViews) ? wsViews : []).map((v, i) => {
@@ -733,6 +780,39 @@ class EmbeddedViewCardEditor extends HTMLElement {
     catch {
       return [];
     }
+  }
+
+
+  // checks if the given view is visible for the current user according to its config
+  _isViewVisibleToUser(view) {
+    // home assistant exposes the current user id on hass.user.id
+    const uid = this._hass?.user?.id || null;
+    if (!uid || !view) return true; // if we can't tell, fail open
+
+    //  normalize possible visibility definitions:
+    //  - 'visible': [ { user: "<id>" }, ... ]  (common)
+    //  - 'visible': [ "<id>", ... ]            (tolerate strings)
+    //  - 'visibility' or 'users' fallbacks (be liberal in what we accept)
+    const raw =
+      (Array.isArray(view.visible) && view.visible.length ? view.visible : null) ||
+      (Array.isArray(view.visibility) && view.visibility.length ? view.visibility : null) ||
+      (Array.isArray(view.users) && view.users.length ? view.users : null);
+
+    // no rules -> visible for everyone
+    if (!raw) return true;
+
+    // allow if any rule explicitly includes the current user id
+    for (const r of raw) {
+      if (typeof r === "string" && r === uid) return true;
+      if (r && typeof r === "object") {
+        if (typeof r.user === "string" && r.user === uid) return true;
+        if (Array.isArray(r.user) && r.user.includes(uid)) return true;
+        if (Array.isArray(r.users) && r.users.includes(uid)) return true;
+      }
+    }
+
+    // rules exist but none matched -> not visible for this user
+    return false;
   }
 
 
