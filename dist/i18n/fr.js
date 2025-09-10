@@ -5,6 +5,7 @@ const FR = {
   "Invalid dynamic target": "Cible dynamique invalide",
   "View not found": "Vue introuvable",
   "Error loading view": "Erreur lors du chargement de la vue",
+  "View not visible for this user": "Vue non visible pour cet utilisateur",
 
   // editor ui
   "Mode": "Mode",
