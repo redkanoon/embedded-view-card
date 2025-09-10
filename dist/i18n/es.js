@@ -5,6 +5,7 @@ const ES = {
   "Invalid dynamic target": "Destino dinámico no válido",
   "View not found": "Vista no encontrada",
   "Error loading view": "Error al cargar la vista",
+  "View not visible for this user": "Vista no visible para este usuario",
 
   // editor ui
   "Mode": "Modo",
