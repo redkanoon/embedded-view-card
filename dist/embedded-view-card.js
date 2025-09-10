@@ -247,7 +247,7 @@ class EmbeddedViewCard extends HTMLElement {
 
     // respect 'visible' rules
     if (!this._isViewVisibleToUser(view)) {
-      this._showError("View not visible for this user");
+      this._showError(this._t("View not visible for this user"));
       return;
     }
 
