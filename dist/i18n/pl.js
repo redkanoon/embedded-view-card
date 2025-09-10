@@ -5,6 +5,7 @@ const PL = {
   "Invalid dynamic target": "Nieprawidłowy cel dynamiczny",
   "View not found": "Nie znaleziono widoku",
   "Error loading view": "Błąd podczas wczytywania widoku",
+  "View not visible for this user": "Widok niewidoczny dla tego użytkownika",
 
   // editor ui
   "Mode": "Tryb",
