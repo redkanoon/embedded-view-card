@@ -94,7 +94,11 @@ class EmbeddedViewCard extends HTMLElement {
     if (!this._config) return;
 
     // read current dashboard and view
-    const currentDashboard = this._getHuiRoot()?.lovelace?.urlPath || null;
+    let currentDashboard = this._getHuiRoot()?.lovelace?.urlPath || null;
+    // normalize default dashboard: treat "lovelace" as valid, not as null
+    if (currentDashboard === null && window.location.pathname.includes("/lovelace")) {
+      currentDashboard = "lovelace";
+    }
     const segments = window.location.pathname.split("/").filter(Boolean);
     const i = currentDashboard ? segments.indexOf(currentDashboard) : -1;
     const currentView = i >= 0 && segments[i + 1] ? decodeURIComponent(segments[i + 1]) : null; 
