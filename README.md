@@ -28,6 +28,8 @@ This card was built to feel like a native part of Home Assistant – rendering v
 - Embed any view from the **current or another dashboard**
 - **Static mode**: pick dashboard + view directly
 - **Dynamic mode**: use an entity (`input_text`) whose state is `dashboard/view`
+- **Hash mode**: switch views based on the URL hash (`#climate`, `#lights`, etc.)
+- **Strategy view support**: properly renders strategy-based views (home, sections, etc.)
 - Loop guard to prevent self-embedding
 - Optionally wrap content in `ha-card`
 - **Bleed mode**: remove default padding with adjustable margins
@@ -123,18 +125,79 @@ type: sections
 
 ---
 
+### Hash Mode – URL Hash Switching
+
+```yaml
+type: custom:embedded-view-card
+mode: hash
+default: climate
+states:
+  climate:
+    view: climate
+  lights:
+    view: lights
+  energy:
+    dashboard: dashboard-main
+    view: energy
+```
+
+#### Navigation buttons to switch views
+
+```yaml
+type: horizontal-stack
+cards:
+  - type: button
+    name: Climate
+    tap_action:
+      action: navigate
+      navigation_path: "#climate"
+  - type: button
+    name: Lights
+    tap_action:
+      action: navigate
+      navigation_path: "#lights"
+  - type: button
+    name: Energy
+    tap_action:
+      action: navigate
+      navigation_path: "#energy"
+```
+
+---
+
 ## ⚙️ Options
 
 | Option             | Type     | Description                                           | Default |
 |--------------------|----------|-------------------------------------------------------|---------|
-| `mode`             | string   | `"static"` or `"dynamic"`                             | static  |
+| `mode`             | string   | `"static"`, `"dynamic"`, or `"hash"`                  | static  |
 | `dashboard`        | string   | Dashboard path (static mode)                          | current |
 | `view`             | string   | View path (static mode)                               | —       |
 | `target_entity`    | entity   | Entity whose state provides `dashboard/view` (dynamic)| —       |
+| `default`          | string   | Fallback hash value when no URL hash matches (hash)   | —       |
+| `states`           | object   | Map of hash keys to `{dashboard, view}` configs (hash)| —       |
 | `ha_card`          | boolean  | Whether to wrap content in a `ha-card`                | true    |
 | `bleed`            | boolean  | Remove outer padding (only when `ha_card: false`)     | false   |
 | `bleed_inline`     | number   | Inline padding override (px)                          | 16      |
 | `bleed_block`      | number   | Block padding override (px)                           | 8       |
+
+---
+
+## ⚙️ Hash Mode `states` Structure
+
+The `states` object maps URL hash keys (or path segments) to view configurations:
+
+```yaml
+states:
+  climate:
+    view: climate
+  lights:
+    view: lights
+  energy:
+    dashboard: dashboard-main
+    view: energy
+```
+
+Each key (e.g., `climate`, `lights`) corresponds to a URL hash (`#climate`, `#lights`) or an extra path segment (`/dashboard/view/climate`). The value specifies which view to load, optionally from a different dashboard.
 
 ---
 
@@ -151,9 +214,11 @@ type: sections
 
 - Uses internal components like `hui-root` and `hui-view`  
   *(subject to change by Home Assistant core)*
-- Internal caching of WS configs for faster reloads
+- **Strategy views**: properly detects and renders strategy-based views (e.g., `home`, `sections` strategies) by passing the `strategy` config to `hui-view`
+- Internal caching of WS configs with deduplication for concurrent requests
 - Smarter re-rendering (only when dashboard/view changes)
 - Gracefully shows error messages when view is not found or misconfigured
+- User visibility rules are respected for all embedded views
 
 ---
 
@@ -162,7 +227,7 @@ type: sections
 Feel free to submit pull requests and suggestions.  
 Ideas for improvement:
 
-- Add safe recursive loop detection
+- Add safe recursive loop detection (cross-call chains)
 - Add mode "internal" where the embedded view could be changed with actions
 
 ---

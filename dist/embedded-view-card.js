@@ -4,6 +4,64 @@
 import { VERSION } from "./version.js";
 import { t as i18n } from "./i18n/index.js";
 
+
+// ── Shared utilities (used by both card and editor) ──────────────────────────
+
+function _getHuiRoot() {
+  return document
+    .querySelector("home-assistant")?.shadowRoot
+    ?.querySelector("home-assistant-main")?.shadowRoot
+    ?.querySelector("ha-panel-lovelace")?.shadowRoot
+    ?.querySelector("hui-root");
+}
+
+function _isViewVisibleToUser(view, hass) {
+  const uid = hass?.user?.id || null;
+  if (!uid || !view) return true;
+
+  const raw =
+    (Array.isArray(view.visible) && view.visible.length ? view.visible : null) ||
+    (Array.isArray(view.visibility) && view.visibility.length ? view.visibility : null) ||
+    (Array.isArray(view.users) && view.users.length ? view.users : null);
+
+  if (!raw) return true;
+
+  for (const r of raw) {
+    if (typeof r === "string" && r === uid) return true;
+    if (r && typeof r === "object") {
+      if (typeof r.user === "string" && r.user === uid) return true;
+      if (Array.isArray(r.user) && r.user.includes(uid)) return true;
+      if (Array.isArray(r.users) && r.users.includes(uid)) return true;
+    }
+  }
+
+  return false;
+}
+
+function _escapeHtml(str) {
+  if (typeof str !== "string") return String(str ?? "");
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// parse a combined "dashboard/view" string into { dashboard, view }.
+// accepts: "dashboard/view", "/dashboard/view", "current/view", "view", "/view"
+function _parseDashboardViewString(value, currentDashboard) {
+  if (typeof value !== "string") return null;
+  const parts = value.trim().replace(/^\//, "").split("/").filter(Boolean);
+  if (parts.length === 0) return null;
+  if (parts.length === 1) return { dashboard: currentDashboard, view: parts[0] };
+  if (parts.length === 2) {
+    const [dash, view] = parts;
+    return { dashboard: dash === "current" ? currentDashboard : dash, view };
+  }
+  return null;
+}
+
 class EmbeddedViewCard extends HTMLElement {
 
   // initializes the card instance, sets up shadow DOM and internal containers
@@ -17,22 +75,49 @@ class EmbeddedViewCard extends HTMLElement {
     this._activeViewElement = null;
 
     // initialize caches
-    this._resolved = { view: undefined, dashboard: undefined };
+    this._resolved = { view: undefined, dashboard: undefined, hash: undefined };
     this._waitingForRoot = false;
     this._wsConfigCache = {};
+    this._waitForTimers = new Set();
 
     // initialize DOM elements
     this._container = document.createElement("div");
     this._container.style.display = "contents";
     this._inner = document.createElement("div");
     this._inner.style.margin = "0";
+
+    // hash mode handler
+    this._onHashChange = this._onHashChange.bind(this);
+
+    // hash mode view cache
+    this._hashViews = {};
+  }
+
+
+  connectedCallback() {
+    window.addEventListener("hashchange", this._onHashChange);
+    window.addEventListener("popstate", this._onHashChange);
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("hashchange", this._onHashChange);
+    window.removeEventListener("popstate", this._onHashChange);
+    for (const id of this._waitForTimers) clearTimeout(id);
+    this._waitForTimers.clear();
+  }
+
+  _onHashChange() {
+    if (this._config.mode === "hash") {
+      this._resolved.hash = undefined;
+      this.hass = this._hass;
+    }
   }
 
 
   // applies user configuration, sets defaults, and builds the initial DOM structure
   setConfig(config) {
     this._config = {
-      mode: "static",               // mode: static or dynamic
+      mode: "static",               // mode: static, dynamic, or hash
 
       // static mode
       dashboard: undefined,         // dashboard  (empty or undefined => current)
@@ -42,6 +127,10 @@ class EmbeddedViewCard extends HTMLElement {
       // dynamic mode
       target_entity: undefined,     // entity whose state is "dashboard/view"
       view_path_entity: undefined,  // legacy fallback (read-only)
+
+      // hash mode
+      default: undefined,           // fallback hash value
+      states: {},                   // map of hash -> { dashboard, view }
 
       // style
       ha_card: true,
@@ -104,11 +193,12 @@ class EmbeddedViewCard extends HTMLElement {
     const currentView = i >= 0 && segments[i + 1] ? decodeURIComponent(segments[i + 1]) : null; 
 
     // resolve target (dashboard + view) by mode
-    const mode = this._config.mode === "dynamic" ? "dynamic" : "static";
+    const mode = this._config.mode === "dynamic" ? "dynamic" : this._config.mode === "hash" ? "hash" : "static";
 
     let effectiveDashboard = null;
     let effectiveView = null;
     let external = false;
+    let currentHash = "";
 
     // wait for current dashboard
     if (!currentDashboard) {
@@ -121,7 +211,47 @@ class EmbeddedViewCard extends HTMLElement {
       return;
     }
 
-    if (mode === "dynamic") {
+    if (mode === "hash") {
+      // hash mode -> read URL hash or extra path segment, match against states map
+      const hashValue = window.location.hash.replace(/^#/, "");
+      // extract extra path segment as the last segment beyond dashboard/view
+      // e.g. /dashboard-test/home/climate -> segments=["dashboard-test","home","climate"] -> "climate"
+      const pathValue = segments.length > 2 ? decodeURIComponent(segments[segments.length - 1]) : "";
+      currentHash = hashValue || pathValue || this._config.default || "";
+
+      if (!currentHash) {
+        if (this._resolved.view !== "__error_hash__") {
+          this._resolved.view = "__error_hash__";
+          this._showError(this._t("Missing configuration") + ": no URL hash, path segment, or default value");
+        }
+        return;
+      }
+
+      const states = this._config.states || {};
+      const stateConfig = states[currentHash];
+
+      if (!stateConfig) {
+        if (this._resolved.view !== "__error_hash__") {
+          this._resolved.view = "__error_hash__";
+          this._showError(this._t("No matching state for hash") + ": " + currentHash);
+        }
+        return;
+      }
+
+      effectiveView = stateConfig.view;
+      if (!effectiveView) {
+        if (this._resolved.view !== "__error_hash__") {
+          this._resolved.view = "__error_hash__";
+          this._showError(this._t("Missing configuration") + ": no view for hash \"" + currentHash + "\"");
+        }
+        return;
+      }
+
+      effectiveDashboard = stateConfig.dashboard || currentDashboard || null;
+      external = Boolean(effectiveDashboard && currentDashboard && (effectiveDashboard !== currentDashboard));
+    } 
+    
+    else if (mode === "dynamic") {
       // dynamic -> "target_entity"
       const targetentity = this._config.target_entity;
       const targetentitystate = targetentity ? this._hass?.states?.[targetentity]?.state : undefined;
@@ -137,7 +267,7 @@ class EmbeddedViewCard extends HTMLElement {
       const parsed = this._parseTargetString(targetentitystate, currentDashboard);
 
       if (!parsed || !parsed.dashboard || !parsed.view) {
-        this._showError(this._t("Invalid dynamic target") + ": " + targetentitystate);
+        this._showError(this._t("Invalid dynamic target") + ": " + _escapeHtml(targetentitystate));
         return;
       }
 
@@ -152,7 +282,7 @@ class EmbeddedViewCard extends HTMLElement {
       effectiveView = this._config.view ?? this._config.view_path;
       if (!effectiveView && this._config.view_path_entity) {
         const viewpathentity = this._config.view_path_entity;
-        const viewpathentitystate = viewpathentity ? this._hass.states?.[viewpathentity] : undefined;
+        const viewpathentitystate = viewpathentity ? this._hass?.states?.[viewpathentity] : undefined;
         effectiveView = viewpathentitystate?.state || undefined;
       }
       if (!effectiveView) {
@@ -171,7 +301,7 @@ class EmbeddedViewCard extends HTMLElement {
 
     // loop guard -> prevent self-embedding
     if (effectiveDashboard == currentDashboard && effectiveView == currentView) {
-      this._showError(this._t("Self embedding not alowed") + ":<br>host view = " + currentDashboard + "/" + currentView + "<br>embedding view = " + effectiveDashboard + "/" + effectiveView);
+      this._showError(this._t("Self embedding not allowed") + ":<br>host view = " + _escapeHtml(currentDashboard) + "/" + _escapeHtml(currentView) + "<br>embedding view = " + _escapeHtml(effectiveDashboard) + "/" + _escapeHtml(effectiveView));
       return;
     }
 
@@ -179,7 +309,8 @@ class EmbeddedViewCard extends HTMLElement {
     const needRender =
       !this._activeViewElement ||
       effectiveView !== this._resolved.view ||
-      effectiveDashboard !== this._resolved.dashboard;
+      effectiveDashboard !== this._resolved.dashboard ||
+      (mode === "hash" && currentHash !== this._resolved.hash);
 
     if (needRender) {
       this._renderTarget(effectiveDashboard, effectiveView, external).catch((err) => {
@@ -235,7 +366,7 @@ class EmbeddedViewCard extends HTMLElement {
         }
       }
       if (!fresh) {
-        this._showError(this._t("View not found") + ": " + viewPath);
+        this._showError(this._t("View not found") + ": " + _escapeHtml(viewPath));
         return;
       }
       lovelace = { config: freshConfig, urlPath: dashboardPath, editMode: false };
@@ -245,7 +376,7 @@ class EmbeddedViewCard extends HTMLElement {
 
     // no view found
     if (!view) {
-      this._showError(this._t("View not found") + ": " + viewPath);
+      this._showError(this._t("View not found") + ": " + _escapeHtml(viewPath));
       return;
     }
 
@@ -262,7 +393,10 @@ class EmbeddedViewCard extends HTMLElement {
     huiview.narrow = false;
     huiview.lovelace = lovelace;
     huiview.index = views.indexOf(view);
-    huiview.isStrategyView = false;
+    huiview.isStrategyView = !!view?.strategy;
+    if (view?.strategy) {
+      huiview.strategy = view.strategy;
+    }
     huiview.viewConfig = view;
 
     this._inner.innerHTML = "";
@@ -272,81 +406,42 @@ class EmbeddedViewCard extends HTMLElement {
     // storage paths so that we render only on change 
     this._resolved.view = viewPath;
     this._resolved.dashboard = dashboardPath;
+    if (this._config.mode === "hash") {
+      this._resolved.hash = window.location.hash.replace(/^#/, "") || this._config.default || "";
+    }
   }
 
 
   // checks if the given view is visible for the current user according to its config
   _isViewVisibleToUser(view) {
-    // home assistant exposes the current user id on hass.user.id
-    const uid = this._hass?.user?.id || null;
-    if (!uid || !view) return true; // if we can't tell, fail open
-
-    //  normalize possible visibility definitions:
-    //  - 'visible': [ { user: "<id>" }, ... ]  (common)
-    //  - 'visible': [ "<id>", ... ]            (tolerate strings)
-    //  - 'visibility' or 'users' fallbacks (be liberal in what we accept)
-    const raw =
-      (Array.isArray(view.visible) && view.visible.length ? view.visible : null) ||
-      (Array.isArray(view.visibility) && view.visibility.length ? view.visibility : null) ||
-      (Array.isArray(view.users) && view.users.length ? view.users : null);
-
-    // no rules -> visible for everyone
-    if (!raw) return true;
-
-    // allow if any rule explicitly includes the current user id
-    for (const r of raw) {
-      if (typeof r === "string" && r === uid) return true;
-      if (r && typeof r === "object") {
-        if (typeof r.user === "string" && r.user === uid) return true;
-        if (Array.isArray(r.user) && r.user.includes(uid)) return true;
-        if (Array.isArray(r.users) && r.users.includes(uid)) return true;
-      }
-    }
-
-    // rules exist but none matched -> not visible for this user
-    return false;
+    return _isViewVisibleToUser(view, this._hass);
   }
 
   // fetch dashboard config  (only refresh when `force: true`)
   async _fetchLovelaceConfigWS(urlPath, { force = false } = {}) {
-    // return cached config if present and no force reload was requested
-    if (!force && this._wsConfigCache[urlPath]) {
-      return this._wsConfigCache[urlPath];
+    const cached = this._wsConfigCache[urlPath];
+    if (!force && cached) {
+      return Promise.resolve(cached);
     }
 
-    // fetch fresh config via WS and update cache
-    const config = await this._hass.callWS({ type: "lovelace/config", url_path: urlPath });
-    this._wsConfigCache[urlPath] = config;
-    return config;
+    const promise = this._hass.callWS({ type: "lovelace/config", url_path: urlPath })
+      .then(config => {
+        this._wsConfigCache[urlPath] = config;
+        return config;
+      })
+      .catch(err => {
+        delete this._wsConfigCache[urlPath];
+        throw new Error(`Failed to fetch dashboard config "${urlPath}": ${err.message}`);
+      });
+
+    this._wsConfigCache[urlPath] = promise;
+    return promise;
   }
 
 
   // parse a combined "dashboard/view" string.
   _parseTargetString(targetentitystate, currentDashboard) {
-    /* accepts:
-      "dashboard/view"
-      "/dashboard/view"
-      "current/view"     (uses current dashboard)
-      "view" or "/view"  (uses current dashboard)
-    */
-    if (typeof targetentitystate !== "string") return null;
-
-    const parts = targetentitystate.trim().split("/").filter(Boolean);
-    if (parts.length === 0) return null;
-
-    // only view provided -> current dashboard
-    if (parts.length === 1) {
-      return { dashboard: currentDashboard, view: parts[0] };
-    }
-
-    // dashboard and view provided
-    if (parts.length === 2) {
-      const [dash, view] = parts;
-      return { dashboard: (dash === "current" ? currentDashboard : dash), view };
-    }
-
-    // more than 2 parts are invalid
-    return null;
+    return _parseDashboardViewString(targetentitystate, currentDashboard);
   }
 
 
@@ -367,11 +462,7 @@ class EmbeddedViewCard extends HTMLElement {
 
   // traverses nested shadowRoots to locate the main <hui-root> element of lovelace
   _getHuiRoot() {
-    return document
-      .querySelector("home-assistant")?.shadowRoot
-      ?.querySelector("home-assistant-main")?.shadowRoot
-      ?.querySelector("ha-panel-lovelace")?.shadowRoot
-      ?.querySelector("hui-root");
+    return _getHuiRoot();
   }
 
 
@@ -379,16 +470,23 @@ class EmbeddedViewCard extends HTMLElement {
   async _waitFor(fn, timeout = 8000, message = "Timeout") {
     const start = performance.now();
     return new Promise((resolve, reject) => {
+      let timerId;
       const tick = () => {
         try {
           const v = fn();
-          if (v) return resolve(v);
+          if (v) {
+            this._waitForTimers.delete(timerId);
+            return resolve(v);
+          }
         } catch (_) {}
 
-        if (performance.now() - start > timeout)
+        if (performance.now() - start > timeout) {
+          this._waitForTimers.delete(timerId);
           return reject(new Error(message));
+        }
 
-        setTimeout(tick, 100);
+        timerId = setTimeout(tick, 100);
+        this._waitForTimers.add(timerId);
       };
       tick();
     });
@@ -426,6 +524,8 @@ class EmbeddedViewCardEditor extends HTMLElement {
     this._selectedDash = "";    // dashboard (for UI selection)
     this._dashboards = [];      // [{ value: url_path, label: string }]
     this._viewsForDash = [];    // [{ path, title }]
+    this._hashViews = {};       // cached views per dashboard for hash mode
+    this._needsRender = true;   // only rebuild DOM when structure changes
   }
 
   // lifecycle hook
@@ -442,13 +542,20 @@ class EmbeddedViewCardEditor extends HTMLElement {
     // set currently selected dashboard for the editor dropdown
     if (typeof this._config.dashboard === "string") this._selectedDash = this._config.dashboard;
 
+    // ensure states is always an object when in hash mode
+    if (this._config.mode === "hash" && !this._config.states) {
+      this._config.states = {};
+    }
+
     // notify HA editor that the config has changed
     if (changed) {
       this._updateConfig();
     }
 
-    this._rendered = false;
-    this._safeRender();
+    if (this._needsRender) {
+      this._needsRender = false;
+      this._safeRender();
+    }
   }
 
 
@@ -456,8 +563,8 @@ class EmbeddedViewCardEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     this._collectDashboards().then(() => {
-      if (!this._rendered) this._safeRender();
-    });
+      if (this._needsRender) this._safeRender();
+    }).catch(() => {});
   }
 
 
@@ -519,44 +626,72 @@ class EmbeddedViewCardEditor extends HTMLElement {
     wrap.style.gap = "12px";
     wrap.style.padding = "0 16px";
 
-    // mode selector (dropdown)
-    const modeSel = document.createElement("ha-selector");
-    modeSel.label = this._t("Mode");
-    modeSel.hass = this._hass;
-    modeSel.selector = { select: { options: [
+    // mode selector (plain select for reliability)
+    const modeRow = document.createElement("div");
+    modeRow.style.display = "flex";
+    modeRow.style.alignItems = "center";
+    modeRow.style.gap = "8px";
+
+    const modeLabel = document.createElement("label");
+    modeLabel.textContent = this._t("Mode");
+    modeLabel.style.fontWeight = "600";
+    modeRow.appendChild(modeLabel);
+
+    const modeSel = document.createElement("select");
+    modeSel.style.cssText = "flex:1;padding:8px;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);color:var(--primary-text-color);font-size:14px;";
+    const modeOptions = [
       { value: "static",  label: this._t("Static") },
       { value: "dynamic", label: this._t("Dynamic (entity)") },
-    ], custom_value: true } };  // forces dropdown even with few options
-    modeSel.value = this._config.mode || "static";
+      { value: "hash",    label: this._t("Hash (URL hash)") },
+    ];
+    for (const opt of modeOptions) {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.label;
+      if (opt.value === (this._config.mode || "static")) option.selected = true;
+      modeSel.appendChild(option);
+    }
 
-    modeSel.addEventListener("value-changed", (ev) => {
-      const mode = String(ev.detail?.value || "").toLowerCase() === "dynamic" ? "dynamic" : "static";
+    modeSel.addEventListener("change", () => {
+      const mode = modeSel.value;
       if (this._config.mode === mode) return;
+
       this._config.mode = mode;
 
-      if (mode === "dynamic") {
-        // switching to dynamic: drop static keys immediately
+      if (mode === "hash") {
         delete this._config.dashboard;
         delete this._config.view;
         delete this._config.view_path;
         delete this._config.view_path_entity;
+        delete this._config.target_entity;
+        if (!this._config.states) this._config.states = {};
+        if (!this._config.default) this._config.default = "";
+      }
+      else if (mode === "dynamic") {
+        delete this._config.dashboard;
+        delete this._config.view;
+        delete this._config.view_path;
+        delete this._config.view_path_entity;
+        delete this._config.states;
+        delete this._config.default;
         this._selectedDash = "";
         this._viewsForDash = [];
       }
       else {
-        // switching to static: drop dynamic keys and migrate legacy once
         delete this._config.target_entity;
+        delete this._config.states;
+        delete this._config.default;
         const legacy = this._config.view ?? this._config.view_path ?? "";
         if (legacy !== "") this._config.view = legacy;
         delete this._config.view_path;
         delete this._config.view_path_entity;
       }
 
+      this._needsRender = true;
       this._updateConfig();
-      this._rendered = false;
-      this._safeRender();
     });
-    wrap.appendChild(modeSel);
+    modeRow.appendChild(modeSel);
+    wrap.appendChild(modeRow);
 
     // static mode UI
     if ((this._config.mode || "static") === "static") {
@@ -655,6 +790,236 @@ class EmbeddedViewCardEditor extends HTMLElement {
         }</div>`,
       ].join("");
       wrap.appendChild(pv);
+    }
+
+    // hash mode UI
+    if ((this._config.mode || "static") === "hash") {
+      try {
+      // Defensive guard: ensure _hashViews exists
+      if (!this._hashViews) this._hashViews = {};
+
+      // default value input
+      const defaultInput = document.createElement("ha-selector");
+      defaultInput.label = this._t("Default hash value (fallback)");
+      defaultInput.hass = this._hass;
+      defaultInput.selector = { text: {} };
+      defaultInput.value = this._config.default || "";
+
+      defaultInput.addEventListener("value-changed", (ev) => {
+        this._config.default = ev.detail?.value || "";
+        this._updateConfig();
+      });
+      wrap.appendChild(defaultInput);
+
+      // states list
+      const statesContainer = document.createElement("div");
+      statesContainer.style.display = "flex";
+      statesContainer.style.flexDirection = "column";
+      statesContainer.style.gap = "12px";
+
+      const statesLabel = document.createElement("div");
+      statesLabel.style.fontWeight = "600";
+      statesLabel.textContent = this._t("States (hash → view mapping)");
+      statesContainer.appendChild(statesLabel);
+
+      const buildStateRow = (key) => {
+        const state = this._config.states[key];
+        const card = document.createElement("div");
+        card.style.cssText = "border:1px solid var(--divider-color);border-radius:8px;padding:12px;position:relative;";
+
+        // header row: hash key + remove button
+        const header = document.createElement("div");
+        header.style.cssText = "display:flex;gap:8px;align-items:center;margin-bottom:8px;";
+
+        const keyLabel = document.createElement("span");
+        keyLabel.style.cssText = "font-weight:600;min-width:60px;";
+        keyLabel.textContent = this._t("Hash key");
+        header.appendChild(keyLabel);
+
+        const keyInput = document.createElement("ha-selector");
+        keyInput.selector = { text: {} };
+        keyInput.value = key;
+        keyInput.style.flex = "1";
+        keyInput.addEventListener("value-changed", (ev) => {
+          const newKey = ev.detail?.value || key;
+          if (newKey !== key && newKey) {
+            const newState = { ...this._config.states[key] };
+            delete this._config.states[key];
+            this._config.states[newKey] = newState;
+            this._needsRender = true;
+            this._updateConfig();
+          }
+        });
+        header.appendChild(keyInput);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.textContent = "✕";
+        removeBtn.title = this._t("Remove");
+        removeBtn.style.cssText = "background:none;border:none;color:var(--error-color);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:4px;line-height:1;";
+        removeBtn.addEventListener("mouseover", () => removeBtn.style.background = "rgba(220,53,69,0.1)");
+        removeBtn.addEventListener("mouseout", () => removeBtn.style.background = "none");
+        removeBtn.addEventListener("click", () => {
+          delete this._config.states[key];
+          this._needsRender = true;
+          this._updateConfig();
+        });
+        header.appendChild(removeBtn);
+        card.appendChild(header);
+
+        // dashboard dropdown
+        const dashRow = document.createElement("div");
+        dashRow.style.cssText = "display:flex;gap:8px;align-items:center;margin-bottom:8px;";
+
+        const dashLabel = document.createElement("span");
+        dashLabel.style.cssText = "font-weight:600;min-width:60px;";
+        dashLabel.textContent = this._t("Dashboard");
+        dashRow.appendChild(dashLabel);
+
+        const dashOptions = [{ value: "", label: this._t("(current dashboard)") }, ...this._dashboards];
+        const dashSel = document.createElement("ha-selector");
+        dashSel.selector = { select: { options: dashOptions, custom_value: true } };
+        dashSel.value = state.dashboard || "";
+        dashSel.style.flex = "1";
+        dashRow.appendChild(dashSel);
+        card.appendChild(dashRow);
+
+        // view dropdown
+        const viewRow = document.createElement("div");
+        viewRow.style.cssText = "display:flex;gap:8px;align-items:center;";
+
+        const viewLabel = document.createElement("span");
+        viewLabel.style.cssText = "font-weight:600;min-width:60px;";
+        viewLabel.textContent = this._t("View");
+        viewRow.appendChild(viewLabel);
+
+        const selectedDash = state.dashboard || "";
+        let viewOptions = [];
+        if (selectedDash && this._hashViews[selectedDash]) {
+          viewOptions = this._hashViews[selectedDash].map(v => ({
+            value: v.path,
+            label: v.path ? (v.title ? `${v.title} (${v.path})` : v.path) : v.title
+          }));
+        } else if (!selectedDash && this._hashViews["__current__"]) {
+          viewOptions = this._hashViews["__current__"].map(v => ({
+            value: v.path,
+            label: v.path ? (v.title ? `${v.title} (${v.path})` : v.path) : v.title
+          }));
+        } else {
+          viewOptions = [{ value: "", label: this._t("Loading views…") }];
+        }
+
+        const viewSel = document.createElement("ha-selector");
+        viewSel.selector = { select: { options: viewOptions, custom_value: true } };
+        viewSel.value = state.view || "";
+        viewSel.style.flex = "1";
+        viewRow.appendChild(viewSel);
+        card.appendChild(viewRow);
+
+        // load views when dashboard changes
+        const loadViews = async (dashboard) => {
+          const cacheKey = dashboard || "__current__";
+          if (!this._hashViews[cacheKey]) {
+            this._hashViews[cacheKey] = [{ path: "", title: this._t("Loading views…") }];
+            this._needsRender = true;
+            this._safeRender();
+
+            const views = dashboard ? await this._loadViewsFor(dashboard) : await this._loadViewsFor(this._getHuiRoot()?.lovelace?.urlPath || "lovelace");
+            this._hashViews[cacheKey] = views.length ? views : [{ path: "", title: this._t("No views found") }];
+            this._needsRender = true;
+            this._safeRender();
+          }
+        };
+
+        dashSel.addEventListener("value-changed", (ev) => {
+          const newDash = ev.detail?.value || "";
+          state.dashboard = newDash;
+          this._updateConfig();
+
+          const ck = newDash || "__current__";
+          if (!this._hashViews[ck]) {
+            loadViews(newDash);
+          }
+          this._needsRender = true;
+        });
+
+        viewSel.addEventListener("value-changed", (ev) => {
+          state.view = ev.detail?.value || "";
+          this._updateConfig();
+        });
+
+        return card;
+      };
+
+      // preload current dashboard views (async, non-blocking)
+      const currentDash = this._getHuiRoot()?.lovelace?.urlPath || "lovelace";
+      if (!this._hashViews["__current__"]) {
+        this._hashViews["__current__"] = [{ path: "", title: this._t("Loading views…") }];
+        this._loadViewsFor(currentDash).then(views => {
+          this._hashViews["__current__"] = views.length ? views : [{ path: "", title: this._t("No views found") }];
+          if (this._config.mode === "hash") {
+            this._needsRender = true;
+            this._safeRender();
+          }
+        }).catch(() => {});
+      }
+
+      // preload views for dashboards referenced in existing states (async, non-blocking)
+      const states = this._config.states || {};
+      for (const key of Object.keys(states)) {
+        const dash = states[key].dashboard;
+        const cacheKey = dash || "__current__";
+        if (!this._hashViews[cacheKey]) {
+          this._hashViews[cacheKey] = [{ path: "", title: this._t("Loading views…") }];
+          const loadDash = dash || currentDash;
+          this._loadViewsFor(loadDash).then(views => {
+            this._hashViews[cacheKey] = views.length ? views : [{ path: "", title: this._t("No views found") }];
+            if (this._config.mode === "hash") {
+              this._needsRender = true;
+              this._safeRender();
+            }
+          }).catch(() => {});
+        }
+      }
+
+      // render all state rows
+      for (const key of Object.keys(states)) {
+        statesContainer.appendChild(buildStateRow(key));
+      }
+
+      // add button
+      const addBtn = document.createElement("button");
+      addBtn.textContent = "+ " + this._t("Add state");
+      addBtn.style.cssText = "background:var(--primary-color);color:var(--text-primary-color);border:none;border-radius:8px;padding:8px 16px;cursor:pointer;font-weight:600;font-size:14px;margin-top:4px;";
+      addBtn.addEventListener("click", () => {
+        if (!this._config.states) this._config.states = {};
+        const newKey = "state" + (Object.keys(this._config.states).length + 1);
+        this._config.states[newKey] = { view: "" };
+        this._needsRender = true;
+        this._updateConfig();
+      });
+
+      wrap.appendChild(statesContainer);
+      wrap.appendChild(addBtn);
+
+      // hint
+      const hashHint = document.createElement("div");
+      hashHint.style.opacity = "0.9";
+      hashHint.innerHTML = [
+        `<div><strong>${this._t("How it works")}:</strong></div>`,
+        `<ul style="margin:4px 0 0 16px;padding:0;">`,
+        `<li>${this._t("The card reads the URL hash (e.g., #climate) or extra path segment (e.g., /dashboard/view/climate)")}</li>`,
+        `<li>${this._t("Matches it against the states map above")}</li>`,
+        `<li>${this._t("Use navigate action in buttons to change the hash or path")}</li>`,
+        `</ul>`,
+      ].join("");
+      wrap.appendChild(hashHint);
+      } catch (err) {
+        console.error("[embedded-view-card] hash mode render error:", err);
+        const errDiv = document.createElement("div");
+        errDiv.style.cssText = "padding:12px;border:1px solid var(--error-color);border-radius:8px;color:var(--error-color);font-family:monospace;font-size:12px;";
+        errDiv.textContent = "Hash mode error: " + err.message;
+        wrap.appendChild(errDiv);
+      }
     }
 
     // ha-card toggle
@@ -789,34 +1154,7 @@ class EmbeddedViewCardEditor extends HTMLElement {
 
   // checks if the given view is visible for the current user according to its config
   _isViewVisibleToUser(view) {
-    // home assistant exposes the current user id on hass.user.id
-    const uid = this._hass?.user?.id || null;
-    if (!uid || !view) return true; // if we can't tell, fail open
-
-    //  normalize possible visibility definitions:
-    //  - 'visible': [ { user: "<id>" }, ... ]  (common)
-    //  - 'visible': [ "<id>", ... ]            (tolerate strings)
-    //  - 'visibility' or 'users' fallbacks (be liberal in what we accept)
-    const raw =
-      (Array.isArray(view.visible) && view.visible.length ? view.visible : null) ||
-      (Array.isArray(view.visibility) && view.visibility.length ? view.visibility : null) ||
-      (Array.isArray(view.users) && view.users.length ? view.users : null);
-
-    // no rules -> visible for everyone
-    if (!raw) return true;
-
-    // allow if any rule explicitly includes the current user id
-    for (const r of raw) {
-      if (typeof r === "string" && r === uid) return true;
-      if (r && typeof r === "object") {
-        if (typeof r.user === "string" && r.user === uid) return true;
-        if (Array.isArray(r.user) && r.user.includes(uid)) return true;
-        if (Array.isArray(r.users) && r.users.includes(uid)) return true;
-      }
-    }
-
-    // rules exist but none matched -> not visible for this user
-    return false;
+    return _isViewVisibleToUser(view, this._hass);
   }
 
 
@@ -826,7 +1164,7 @@ class EmbeddedViewCardEditor extends HTMLElement {
   }
 
 
-  // normalizes config: drop legacy keys, keep valid/static/dynamic settings, preserve extras
+  // normalizes config: drop legacy keys, keep valid/static/dynamic/hash settings, preserve extras
   _normalizeConfig(config) {
     const out = {};
 
@@ -836,7 +1174,7 @@ class EmbeddedViewCardEditor extends HTMLElement {
 
     let mode = String(config.mode ?? "static").toLowerCase();
     if (effectiveTarget && mode !== "dynamic") mode = "dynamic";
-    mode = mode === "dynamic" ? "dynamic" : "static";
+    mode = mode === "dynamic" ? "dynamic" : mode === "hash" ? "hash" : "static";
 
     // header
     out.type = "custom:embedded-view-card";
@@ -845,7 +1183,12 @@ class EmbeddedViewCardEditor extends HTMLElement {
     if (mode === "dynamic") {
       // dynamic: keep only dynamic essentials
       if (effectiveTarget) out.target_entity = effectiveTarget;
-      // drop dynamic leftovers implicitly (not copied)
+      // drop dynamic/leftover keys implicitly (not copied)
+    }
+    else if (mode === "hash") {
+      // hash: keep states and default
+      if (config.default) out.default = config.default;
+      if (config.states && Object.keys(config.states).length > 0) out.states = config.states;
     }
     else {
       // static: prefer view and dashboard, (legacy fallback: view_path, view_path_entity)
@@ -879,25 +1222,13 @@ class EmbeddedViewCardEditor extends HTMLElement {
 
   // parse the entity state string into { dashboard, view }; supports "dashboard/view", "current/view", or just "view"
   _parsePreview(value, currentDashboard) {
-    if (typeof value !== "string") return null;
-    let s = value.trim();
-    if (!s) return null;
-    if (s.startsWith("/")) s = s.slice(1);
-    const parts = s.split("/").filter(Boolean);
-    if (parts.length === 1) return { dashboard: currentDashboard, view: parts[0] };
-    const [dash, view, ...rest] = parts;
-    if (!view || rest.length > 0) return null;
-    return { dashboard: dash === "current" ? currentDashboard : dash, view };
+    return _parseDashboardViewString(value, currentDashboard);
   }
 
 
   // traverses nested shadowRoots to locate the main <hui-root> element of lovelace
   _getHuiRoot() {
-    return document
-      .querySelector("home-assistant")?.shadowRoot
-      ?.querySelector("home-assistant-main")?.shadowRoot
-      ?.querySelector("ha-panel-lovelace")?.shadowRoot
-      ?.querySelector("hui-root");
+    return _getHuiRoot();
   }
 
 
