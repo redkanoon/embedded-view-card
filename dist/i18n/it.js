@@ -45,7 +45,16 @@ const IT = {
   "The card reads the URL hash (e.g., #climate) or extra path segment (e.g., /dashboard/view/climate)": "La scheda legge l'hash dell'URL (es: #climate) o il segmento di percorso aggiuntivo (es: /dashboard/view/climate)",
   "Matches it against the states map above": "Lo confronta con la mappa degli stati sopra",
   "Use navigate action in buttons to change the hash or path": "Usare l'azione di navigazione nei pulsanti per cambiare hash o percorso",
-  "Warning: cross-call loop detection is not implemented yet. Do not test recursive embeddings across multiple calls.": "Avviso: il rilevamento dei loop tra più chiamate non è ancora implementato. Non testare incorporamenti ricorsivi su più chiamate.",
+
+  // v2.4
+  "no URL hash, path segment or default value": "nessun hash URL, segmento di percorso o valore predefinito",
+  "no view for hash": "nessuna vista per l'hash",
+  "no target_entity or empty entity": "nessuna target_entity o entità vuota",
+  "no view": "nessuna vista",
+  "Recursive embedding detected": "Incorporamento ricorsivo rilevato",
+  "Hide card types from embedded view": "Nascondi tipi di card nella vista incorporata",
+  "Appearance": "Aspetto",
+  "e.g. custom:navbar-card \u2013 removes cards that the host view already shows": "es. custom:navbar-card – rimuove le card già mostrate dalla vista ospite",
 };
 
 export default IT;

@@ -25,12 +25,14 @@ This card was built to feel like a native part of Home Assistant – rendering v
 
 ## ⚡ Features
 
-- Embed any view from the **current or another dashboard**
+- Embed any view from the **current or another dashboard** – including the built-in dashboards (**Overview/`lovelace`**, **Home**, **Map**, **Energy**) and auto-generated / strategy dashboards (e.g. Areas)
 - **Static mode**: pick dashboard + view directly
 - **Dynamic mode**: use an entity (`input_text`) whose state is `dashboard/view`
 - **Hash mode**: switch views based on the URL hash (`#climate`, `#lights`, etc.)
-- **Strategy view support**: properly renders strategy-based views (home, sections, etc.)
-- Loop guard to prevent self-embedding
+- **Strategy view support**: properly renders strategy-based views (home, areas, energy, …)
+- **View themes**: the `theme` of the embedded view is applied
+- **Hide card types** (`exclude_cards`) – e.g. avoid a duplicated navbar
+- Loop guard: prevents self-embedding and recursive embedding chains (A → B → A)
 - Optionally wrap content in `ha-card`
 - **Bleed mode**: remove default padding with adjustable margins
 - Editor UI with localized labels and previews
@@ -163,6 +165,32 @@ cards:
       navigation_path: "#energy"
 ```
 
+### Built-in dashboards
+
+```yaml
+# first view of the legacy default dashboard ("Overview")
+type: custom:embedded-view-card
+dashboard: lovelace
+view: "0"
+```
+
+```yaml
+# a view of the built-in Energy dashboard (or: home, map, any strategy dashboard)
+type: custom:embedded-view-card
+dashboard: energy
+view: electricity      # energy: overview, electricity, gas, water, now
+```
+
+### Hide card types (e.g. a navbar that every view contains)
+
+```yaml
+type: custom:embedded-view-card
+dashboard: dashboard-rooms
+view: kitchen
+exclude_cards:
+  - custom:navbar-card
+```
+
 ---
 
 ## ⚙️ Options
@@ -175,6 +203,7 @@ cards:
 | `target_entity`    | entity   | Entity whose state provides `dashboard/view` (dynamic)| —       |
 | `default`          | string   | Fallback hash value when no URL hash matches (hash)   | —       |
 | `states`           | object   | Map of hash keys to `{dashboard, view}` configs (hash)| —       |
+| `exclude_cards`    | list     | Card types to hide in the embedded view               | —       |
 | `ha_card`          | boolean  | Whether to wrap content in a `ha-card`                | true    |
 | `bleed`            | boolean  | Remove outer padding (only when `ha_card: false`)     | false   |
 | `bleed_inline`     | number   | Inline padding override (px)                          | 16      |
@@ -203,10 +232,9 @@ Each key (e.g., `climate`, `lights`) corresponds to a URL hash (`#climate`, `#li
 
 ## 🖥️ Editor Support
 
-- Dropdown selection of dashboards and views
+- Dropdown selection of **all** dashboards (incl. Overview, Home, Map, Energy, strategy dashboards) and their views – also for the current dashboard
 - Dynamic entity preview and format hints
 - Localized labels (EN, DE, FR, ES, IT, NL, PL, …)
-- Warning note about recursive loop detection (not yet supported)
 
 ---
 
@@ -215,7 +243,8 @@ Each key (e.g., `climate`, `lights`) corresponds to a URL hash (`#climate`, `#li
 - Uses internal components like `hui-root` and `hui-view`  
   *(subject to change by Home Assistant core)*
 - **Strategy views**: properly detects and renders strategy-based views (e.g., `home`, `sections` strategies) by passing the `strategy` config to `hui-view`
-- Internal caching of WS configs with deduplication for concurrent requests
+- Shared, deduplicated cache of dashboard configs; invalidated on `lovelace_updated`, so embedded views follow edits of the source dashboard
+- Strategy dashboards are generated with Home Assistant's own strategy (with fallbacks for built-in strategies not yet loaded in the browser)
 - Smarter re-rendering (only when dashboard/view changes)
 - Gracefully shows error messages when view is not found or misconfigured
 - User visibility rules are respected for all embedded views
@@ -227,7 +256,6 @@ Each key (e.g., `climate`, `lights`) corresponds to a URL hash (`#climate`, `#li
 Feel free to submit pull requests and suggestions.  
 Ideas for improvement:
 
-- Add safe recursive loop detection (cross-call chains)
 - Add mode "internal" where the embedded view could be changed with actions
 
 ---

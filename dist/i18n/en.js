@@ -45,7 +45,16 @@ const EN = {
   "The card reads the URL hash (e.g., #climate) or extra path segment (e.g., /dashboard/view/climate)": "The card reads the URL hash (e.g., #climate) or extra path segment (e.g., /dashboard/view/climate)",
   "Matches it against the states map above": "Matches it against the states map above",
   "Use navigate action in buttons to change the hash or path": "Use navigate action in buttons to change the hash or path",
-  "Warning: cross-call loop detection is not implemented yet. Do not test recursive embeddings across multiple calls.": "Warning: cross-call loop detection is not implemented yet. Do not test recursive embeddings across multiple calls.",
+
+  // v2.4
+  "no URL hash, path segment or default value": "no URL hash, path segment or default value",
+  "no view for hash": "no view for hash",
+  "no target_entity or empty entity": "no target_entity or empty entity",
+  "no view": "no view",
+  "Recursive embedding detected": "Recursive embedding detected",
+  "Hide card types from embedded view": "Hide card types from embedded view",
+  "Appearance": "Appearance",
+  "e.g. custom:navbar-card \u2013 removes cards that the host view already shows": "e.g. custom:navbar-card – removes cards that the host view already shows",
 };
 
 export default EN;

@@ -45,7 +45,16 @@ const DE = {
   "The card reads the URL hash (e.g., #climate) or extra path segment (e.g., /dashboard/view/climate)": "Die Karte liest den URL-Hash (z.B. #climate) oder das zusätzliche Pfadsegment (z.B. /dashboard/view/climate)",
   "Matches it against the states map above": "Vergleicht es mit der obigen Zustandszuordnung",
   "Use navigate action in buttons to change the hash or path": "Verwenden Sie die Navigationsaktion in Schaltflächen, um den Hash oder Pfad zu ändern",
-  "Warning: cross-call loop detection is not implemented yet. Do not test recursive embeddings across multiple calls.": "Warnung: Die Erkennung von Loops über mehrere Aufrufe ist noch nicht implementiert. Bitte keine rekursiven Einbettungen über mehrere Aufrufe testen.",
+
+  // v2.4
+  "no URL hash, path segment or default value": "kein URL-Hash, Pfadsegment oder Standardwert",
+  "no view for hash": "keine View für Hash",
+  "no target_entity or empty entity": "keine target_entity oder Entität leer",
+  "no view": "keine View",
+  "Recursive embedding detected": "Rekursive Einbettung erkannt",
+  "Hide card types from embedded view": "Kartentypen in der eingebetteten View ausblenden",
+  "Appearance": "Darstellung",
+  "e.g. custom:navbar-card \u2013 removes cards that the host view already shows": "z.B. custom:navbar-card – entfernt Karten, die die Host-View bereits zeigt",
 };
 
 export default DE;

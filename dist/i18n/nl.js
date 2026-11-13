@@ -45,7 +45,16 @@ const NL = {
   "The card reads the URL hash (e.g., #climate) or extra path segment (e.g., /dashboard/view/climate)": "De kaart leest de URL-hash (bijv. #climate) of het extra padsegment (bijv. /dashboard/view/climate)",
   "Matches it against the states map above": "Vergelijkt het met de statuskaart hierboven",
   "Use navigate action in buttons to change the hash or path": "Gebruik de navigatieactie in knoppen om de hash of het pad te wijzigen",
-  "Warning: cross-call loop detection is not implemented yet. Do not test recursive embeddings across multiple calls.": "Waarschuwing: detectie van loops over meerdere aanroepen is nog niet geïmplementeerd. Test geen recursieve insluitingen over meerdere aanroepen.",
+
+  // v2.4
+  "no URL hash, path segment or default value": "geen URL-hash, padsegment of standaardwaarde",
+  "no view for hash": "geen view voor hash",
+  "no target_entity or empty entity": "geen target_entity of lege entiteit",
+  "no view": "geen view",
+  "Recursive embedding detected": "Recursieve insluiting gedetecteerd",
+  "Hide card types from embedded view": "Kaarttypen in de ingesloten view verbergen",
+  "Appearance": "Weergave",
+  "e.g. custom:navbar-card \u2013 removes cards that the host view already shows": "bijv. custom:navbar-card – verwijdert kaarten die de host-view al toont",
 };
 
 export default NL;
